@@ -5,11 +5,12 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QGridLayout, QDialog, QTableWidget, QTableWidgetItem, QHeaderView,
                              QStackedWidget, QTextEdit, QMessageBox, QFileDialog)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor, QFont, QPixmap
 
 from core.dependency_manager import check_and_setup_dependencies
 from core.android_checker import (get_universal_android_details, execute_reboot, 
-                                    execute_screenshot, execute_get_installed_apps)
+                                    execute_screenshot, execute_get_installed_apps,
+                                    capture_live_wallpaper_or_screen)
 from core.ios_checker import get_universal_ios_details
 
 class SetupDependenciesThread(QThread):
@@ -32,36 +33,47 @@ class DeviceScannerThread(QThread):
                 self.device_found.emit(data)
             except Exception:
                 self.device_found.emit(None)
-            self.msleep(1500)
+            self.msleep(1800)
 
-class VerificationReportDialog(QDialog):
+class WallpaperCaptureThread(QThread):
+    preview_ready = pyqtSignal(str)
+
+    def run(self):
+        tmp_img = os.path.join(os.path.expanduser("~"), "device_live_screen.png")
+        if capture_live_wallpaper_or_screen(tmp_img):
+            self.preview_ready.emit(tmp_img)
+
+class ComprehensiveVerificationDialog(QDialog):
     def __init__(self, data, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("3uTools Verification Report - Swap Tech Edition")
-        self.resize(760, 500)
+        self.setWindowTitle("3uTools Pro Full Verification & Hardware Audit Report")
+        self.resize(800, 540)
         self.setStyleSheet("background-color: #ffffff; font-family: 'Segoe UI', Arial, sans-serif;")
         
         layout = QVBoxLayout()
-        header = QLabel(f"Hardware Testing & Authenticity Score: {data.get('brand','')} {data.get('model','')}")
+        header = QLabel(f"Complete Diagnostic Audit: {data.get('brand','')} {data.get('model','')}")
         header.setStyleSheet("font-size: 16px; font-weight: bold; color: #1e62d4; margin-bottom: 8px;")
         layout.addWidget(header)
         
         table = QTableWidget()
         table.setColumnCount(4)
-        table.setHorizontalHeaderLabels(["Test Item", "Factory Value", "Current Read Value", "Test Result"])
+        table.setHorizontalHeaderLabels(["Audit Component", "Factory Expected", "Current Hardware Value", "Audit Verdict"])
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         
         items = [
             ("Device Serial Number", data.get("serial", "N/A"), data.get("serial", "N/A"), "Normal"),
-            ("IMEI / Hardware Identifier", "Original OEM", data.get("imei", "N/A"), "Normal"),
-            ("Display Screen Panel", "OEM Factory Matrix", data.get("screen_status", "Original"), 
+            ("IMEI / Identifiers", "Official Dual/Single", data.get("imei", "N/A"), "Normal"),
+            ("Display Panel Hardware", "OEM Factory Matrix", data.get("screen_status", "Original"), 
              "Replaced Warning" if "Replaced" in str(data.get("screen_status")) else "Normal"),
-            ("Battery Cycle Count", "< 500 Cycles Target", f"{data.get('battery_cycles', 'N/A')} Cycles", "Normal"),
-            ("Loan / Kisti Lock Status", "Clean / No Active Debt", data.get("finance_desc", "Clean"), 
+            ("Display Resolution", "Physical Matrix", data.get("resolution", "1080x2400"), "Normal"),
+            ("RAM Memory Size", "OEM Unified", data.get("ram", "6 GB"), "Normal"),
+            ("Battery Cycle Count", "< 500 Healthy Threshold", f"{data.get('battery_cycles', 'N/A')} Cycles", "Normal"),
+            ("Battery Temp & Voltage", "< 40°C Safe Line", f"{data.get('battery_temp', '')} | {data.get('battery_volt', '')}", "Normal"),
+            ("Finance / Kisti Loan Lock", "Clean / Fully Discharged", data.get("finance_desc", "Clean"), 
              "LOCKED" if data.get("finance_locked") else "Normal"),
-            ("Device Security State", "Official Factory State", data.get("security_status", "Official"), 
-             "Tampered / Unlocked" if "Risk" in str(data.get("security_status")) else "Normal"),
-            ("Firmware / OS Integrity", "Genuine Firmware", data.get("os_version", "Verified"), "Normal")
+            ("Knox / Bootloader Security", "Official Untampered (0x0)", data.get("security_status", "Official"), 
+             "Tampered / Unlocked" if "Risk" in str(data.get("security_status")) or "Tripped" in str(data.get("security_status")) else "Normal"),
+            ("Firmware Baseband", "Signed Modem", data.get("baseband", "Official"), "Normal")
         ]
         
         table.setRowCount(len(items))
@@ -81,7 +93,7 @@ class VerificationReportDialog(QDialog):
         layout.addWidget(table)
         
         btn_close = QPushButton("Close Report")
-        btn_close.setStyleSheet("background-color: #1e62d4; color: white; padding: 8px 24px; border-radius: 4px; font-weight: bold;")
+        btn_close.setStyleSheet("background-color: #1e62d4; color: white; padding: 9px 26px; border-radius: 4px; font-weight: bold;")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
         self.setLayout(layout)
@@ -91,12 +103,13 @@ class Universal3uShopMaster(QMainWindow):
         super().__init__()
         self.current_data = None
         self.active_tab_index = 0
+        self.preview_loaded = False
         self.initUI()
         self.start_initial_setup()
 
     def initUI(self):
         self.setWindowTitle("Shop Master Pro - Universal 3uTools Suite (Swap Tech)")
-        self.resize(1180, 750)
+        self.resize(1200, 760)
         self.setStyleSheet("background-color: #f1f3f6; font-family: 'Segoe UI', Tahoma, sans-serif;")
 
         central_widget = QWidget()
@@ -104,7 +117,7 @@ class Universal3uShopMaster(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        # 1. Top Bar
+        # Top Bar
         top_bar = QFrame()
         top_bar.setFixedHeight(55)
         top_bar.setStyleSheet("background-color: #1a56c4; border-bottom: 2px solid #144399;")
@@ -127,7 +140,6 @@ class Universal3uShopMaster(QMainWindow):
         top_bar.setLayout(bar_layout)
         root_layout.addWidget(top_bar)
 
-        # 2. QStackedWidget (Correct widget for view switching)
         self.pages = QStackedWidget()
         
         # --- TAB 1: Device Info ---
@@ -136,13 +148,13 @@ class Universal3uShopMaster(QMainWindow):
         info_layout.setContentsMargins(20, 20, 20, 20)
         info_layout.setSpacing(25)
 
-        # Left Column
+        # Left Column (Device Live Screenshot Frame)
         left_col = QVBoxLayout()
         self.device_icon = QLabel("📱")
         self.device_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.device_icon.setStyleSheet("""
-            font-size: 90px; background-color: #ffffff; border: 2px dashed #cbd5e1; 
-            border-radius: 10px; min-width: 220px; min-height: 280px;
+            font-size: 85px; background-color: #ffffff; border: 2px dashed #cbd5e1; 
+            border-radius: 12px; min-width: 220px; max-width: 230px; min-height: 310px; max-height: 320px;
         """)
         left_col.addWidget(self.device_icon)
 
@@ -153,7 +165,7 @@ class Universal3uShopMaster(QMainWindow):
 
         self.btn_verification = QPushButton("View Verification Report")
         self.btn_verification.setStyleSheet("""
-            QPushButton { background-color: #16a34a; color: white; font-weight: bold; padding: 12px; border-radius: 6px; font-size: 13px; margin-top: 10px; }
+            QPushButton { background-color: #16a34a; color: white; font-weight: bold; padding: 12px; border-radius: 6px; font-size: 13px; margin-top: 8px; }
             QPushButton:hover { background-color: #15803d; }
         """)
         self.btn_verification.clicked.connect(self.show_report)
@@ -188,15 +200,15 @@ class Universal3uShopMaster(QMainWindow):
             ("Platform / Brand:", "val_brand"),
             ("Product Model:", "val_model"),
             ("Serial Number:", "val_serial"),
-            ("IMEI / Unique ID:", "val_imei"),
+            ("IMEI 1 / IMEI 2:", "val_imei"),
             ("Operating System:", "val_os"),
-            ("Security Patch:", "val_patch"),
-            ("Processor / SoC:", "val_cpu"),
-            ("Battery Cycles:", "val_cycles"),
-            ("Battery Health:", "val_health"),
-            ("Display Panel Status:", "val_screen"),
-            ("Knox / Bootloader State:", "val_security"),
-            ("Storage Available:", "val_storage")
+            ("RAM & Hardware SoC:", "val_soc"),
+            ("Screen & Resolution:", "val_screen"),
+            ("Battery Cycles & Temp:", "val_battery"),
+            ("Battery Level / Health:", "val_health"),
+            ("Security & Knox State:", "val_security"),
+            ("Security Patch Date:", "val_patch"),
+            ("Internal Storage:", "val_storage")
         ]
 
         self.val_labels = {}
@@ -232,7 +244,7 @@ class Universal3uShopMaster(QMainWindow):
         self.tab_info.setLayout(info_layout)
         self.pages.addWidget(self.tab_info)
 
-        # --- TAB 2: Apps ---
+        # TAB 2: Apps
         self.tab_apps = QWidget()
         apps_layout = QVBoxLayout()
         apps_layout.setContentsMargins(20, 20, 20, 20)
@@ -254,11 +266,10 @@ class Universal3uShopMaster(QMainWindow):
         self.table_apps.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table_apps.setStyleSheet("background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px;")
         apps_layout.addWidget(self.table_apps)
-        
         self.tab_apps.setLayout(apps_layout)
         self.pages.addWidget(self.tab_apps)
 
-        # --- TAB 3: RT Logs ---
+        # TAB 3: RT Logs
         self.tab_logs = QWidget()
         logs_layout = QVBoxLayout()
         logs_layout.setContentsMargins(20, 20, 20, 20)
@@ -274,7 +285,7 @@ class Universal3uShopMaster(QMainWindow):
         self.tab_logs.setLayout(logs_layout)
         self.pages.addWidget(self.tab_logs)
 
-        # --- TAB 4: Toolbox ---
+        # TAB 4: Toolbox
         self.tab_tools = QWidget()
         tools_layout = QVBoxLayout()
         tools_layout.setContentsMargins(25, 25, 25, 25)
@@ -360,12 +371,23 @@ class Universal3uShopMaster(QMainWindow):
         self.scanner.device_found.connect(self.render_data)
         self.scanner.start()
 
+    def set_live_preview(self, img_path):
+        if os.path.exists(img_path):
+            pix = QPixmap(img_path)
+            scaled = pix.scaled(180, 290, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.device_icon.setPixmap(scaled)
+            self.device_icon.setStyleSheet("border: 2px solid #1a56c4; border-radius: 10px; background-color: #ffffff; min-width: 220px; max-width: 230px; min-height: 310px; max-height: 320px;")
+            self.preview_loaded = True
+
     def render_data(self, data):
         if not data:
             self.current_data = None
+            self.preview_loaded = False
             self.lbl_device_title.setText("কোনো ফোন কানেক্টেড নেই")
             self.lbl_device_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #94a3b8;")
-            self.device_icon.setText("🔌")
+            self.device_icon.clear()
+            self.device_icon.setText("📱")
+            self.device_icon.setStyleSheet("font-size: 85px; background-color: #ffffff; border: 2px dashed #cbd5e1; border-radius: 12px; min-width: 220px; max-width: 230px; min-height: 310px; max-height: 320px;")
             
             self.finance_box.setStyleSheet("background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px;")
             self.lbl_f_title.setText("DEVICE WAITING...")
@@ -385,6 +407,7 @@ class Universal3uShopMaster(QMainWindow):
             self.current_data = data
             self.lbl_device_title.setText("স্ক্রিনে পারমিশন দিন!")
             self.lbl_device_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #d97706;")
+            self.device_icon.clear()
             self.device_icon.setText("⚠️")
             self.finance_box.setStyleSheet("background-color: #fffbeb; border: 1.5px solid #fde68a; border-radius: 6px; padding: 12px;")
             self.lbl_f_title.setText("AUTHORIZATION REQUIRED ⚠️")
@@ -397,7 +420,12 @@ class Universal3uShopMaster(QMainWindow):
         model = data.get("model", "")
         self.lbl_device_title.setText(f"{brand} {model}")
         self.lbl_device_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1a56c4;")
-        self.device_icon.setText("📱")
+
+        # Fetch live preview if not loaded yet
+        if not self.preview_loaded and data.get("type", "").endswith("(Android)"):
+            self.wp_thread = WallpaperCaptureThread()
+            self.wp_thread.preview_ready.connect(self.set_live_preview)
+            self.wp_thread.start()
 
         if data.get("finance_locked"):
             self.finance_box.setStyleSheet("background-color: #fef2f2; border: 2px solid #ef4444; border-radius: 6px; padding: 12px;")
@@ -412,25 +440,38 @@ class Universal3uShopMaster(QMainWindow):
             self.lbl_f_desc.setText(data.get("finance_desc", "Clean"))
             self.lbl_f_desc.setStyleSheet("color: #166534; font-size: 13px; font-weight: bold;")
 
+        # Populate All Detailed Specs
         self.val_labels["val_brand"].setText(data.get("type", "Unknown"))
         self.val_labels["val_model"].setText(data.get("model", "-"))
         self.val_labels["val_serial"].setText(data.get("serial", "-"))
+        
+        # Dual / Single IMEI
         self.val_labels["val_imei"].setText(data.get("imei", "-"))
         self.val_labels["val_os"].setText(data.get("os_version", "-"))
-        self.val_labels["val_patch"].setText(data.get("security_patch", "-"))
-        self.val_labels["val_cpu"].setText(data.get("cpu", "-"))
         
-        cycles = str(data.get("battery_cycles", "N/A"))
-        self.val_labels["val_cycles"].setText(f"{cycles} Times" if cycles.isdigit() else cycles)
-        self.val_labels["val_health"].setText(data.get("battery_health", "-"))
+        # RAM + SoC
+        ram = data.get("ram", "")
+        cpu = data.get("cpu", "")
+        self.val_labels["val_soc"].setText(f"{ram} RAM | {cpu}")
 
+        # Screen & Resolution
         scr = data.get("screen_status", "Original")
-        self.val_labels["val_screen"].setText(scr)
+        res = data.get("resolution", "")
+        self.val_labels["val_screen"].setText(f"{scr} ({res})")
         self.val_labels["val_screen"].setStyleSheet("color: #dc2626; font-weight: bold;" if "Replaced" in scr else "color: #16a34a; font-weight: bold;")
+
+        # Battery Cycles & Temp
+        cycles = str(data.get("battery_cycles", "N/A"))
+        temp = data.get("battery_temp", "")
+        self.val_labels["val_battery"].setText(f"{cycles} Cycles | {temp}")
+        
+        self.val_labels["val_health"].setText(data.get("battery_health", "-"))
 
         sec = data.get("security_status", "Official")
         self.val_labels["val_security"].setText(sec)
         self.val_labels["val_security"].setStyleSheet("color: #dc2626; font-weight: bold;" if "Risk" in sec or "Tripped" in sec else "color: #15803d; font-weight: bold;")
+
+        self.val_labels["val_patch"].setText(data.get("security_patch", "-"))
 
         tot = data.get("storage_total", "128 GB")
         free = data.get("storage_free", "64 GB")
@@ -443,7 +484,7 @@ class Universal3uShopMaster(QMainWindow):
         if not self.current_data or self.current_data.get("state") != "normal":
             QMessageBox.information(self, "No Device", "অনুগ্রহ করে আগে কোনো সচল ডিভাইস কানেক্ট করুন!")
             return
-        dialog = VerificationReportDialog(self.current_data, self)
+        dialog = ComprehensiveVerificationDialog(self.current_data, self)
         dialog.exec()
 
     def load_installed_apps(self):

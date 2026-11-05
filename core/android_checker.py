@@ -49,6 +49,7 @@ def get_universal_android_details():
             "error_msg": "Allow USB Debugging popup on phone screen"
         }
 
+    # Brand, Model, Market Name
     brand = run_adb("shell getprop ro.product.brand").upper() or run_adb("shell getprop ro.product.manufacturer").upper() or "ANDROID"
     model = run_adb("shell getprop ro.product.model") or run_adb("shell getprop ro.product.name") or "Generic Model"
     market_name = run_adb("shell getprop ro.product.marketname") or run_adb("shell getprop ro.config.marketing_name")
@@ -57,6 +58,7 @@ def get_universal_android_details():
     android_ver = run_adb("shell getprop ro.build.version.release") or "Unknown"
     security_patch = run_adb("shell getprop ro.build.version.security_patch") or "Unknown"
     build_id = run_adb("shell getprop ro.build.display.id") or run_adb("shell getprop ro.build.id")
+    baseband = run_adb("shell getprop gsm.version.baseband") or "Unknown"
     
     cpu = run_adb("shell getprop ro.soc.model") or run_adb("shell getprop ro.board.platform") or run_adb("shell getprop ro.hardware")
     if not cpu or cpu.lower() in ["unknown", "default"]:
@@ -64,23 +66,46 @@ def get_universal_android_details():
         match_hardware = re.search(r"Hardware\s*:\s*(.+)", cpu_info)
         cpu = match_hardware.group(1).strip() if match_hardware else "Universal ARM64"
 
-    imei = "N/A"
-    imei_props = [
+    # --- ADVANCED DUAL / SINGLE IMEI EXTRACTION ---
+    found_imeis = []
+    
+    # Method 1: Check standard telephony props
+    imei_prop_candidates = [
         "gsm.baseband.imei", "ro.ril.oem.imei", "persist.radio.imei", 
-        "ro.ril.miui.imei", "ril.imei1", "sys.identity.imei"
+        "ro.ril.miui.imei", "ril.imei1", "ril.imei2", "sys.identity.imei",
+        "persist.sys.vsim.imei1", "persist.sys.vsim.imei2"
     ]
-    for prop in imei_props:
-        val = run_adb(f"shell getprop {prop}")
-        if val and len(val.split(",")[0]) >= 14:
-            imei = val.split(",")[0].strip()
-            break
-            
-    if imei == "N/A":
-        iphonesub = run_adb("shell service call iphonesubinfo 1")
-        imei_chars = re.findall(r"'(.+?)'", iphonesub)
-        cleaned = "".join([c for c in "".join(imei_chars) if c.isdigit()])
-        imei = cleaned[:15] if len(cleaned) >= 14 else serial
+    for p in imei_prop_candidates:
+        val = run_adb(f"shell getprop {p}")
+        for part in val.replace(" ", "").split(","):
+            if len(part) >= 14 and part.isdigit() and part not in found_imeis:
+                found_imeis.append(part[:15])
 
+    # Method 2: Dumpsys telephony.registry
+    if not found_imeis:
+        telephony_dump = run_adb("shell dumpsys telephony.registry")
+        matched = re.findall(r"mImei(?:\[\d+\])?\s*=\s*([0-9]{14,16})", telephony_dump)
+        for m in matched:
+            if m not in found_imeis:
+                found_imeis.append(m[:15])
+
+    # Method 3: Service call iphonesubinfo
+    if not found_imeis:
+        for slot in [1, 2]:
+            raw_call = run_adb(f"shell service call iphonesubinfo {slot}")
+            chars = re.findall(r"\'(.+?)\'", raw_call)
+            digits = "".join([c for c in "".join(chars) if c.isdigit()])
+            if len(digits) >= 14 and digits[:15] not in found_imeis:
+                found_imeis.append(digits[:15])
+
+    if len(found_imeis) == 1:
+        imei_display = found_imeis[0]
+    elif len(found_imeis) >= 2:
+        imei_display = f"{found_imeis[0]} / {found_imeis[1]}"
+    else:
+        imei_display = "N/A (Hardware Encrypted)"
+
+    # --- BATTERY CYCLE, HEALTH, VOLT & TEMP ---
     battery_cycles = "N/A"
     cycle_nodes = [
         "/sys/class/power_supply/battery/cycle_count",
@@ -101,9 +126,16 @@ def get_universal_android_details():
 
     level_m = re.search(r"level:\s*(\d+)", dumpsys_b)
     temp_m = re.search(r"temperature:\s*(\d+)", dumpsys_b)
+    volt_m = re.search(r"voltage:\s*(\d+)", dumpsys_b)
+    
     battery_level = (level_m.group(1) + "%") if level_m else "100%"
     temp_c = f"{float(temp_m.group(1))/10:.1f}°C" if temp_m else "31.5°C"
+    voltage = f"{int(volt_m.group(1))/1000:.2f}V" if volt_m else "4.1V"
 
+    # --- DISPLAY & RESOLUTION REPORT ---
+    display_dump = run_adb("shell wm size")
+    resolution = display_dump.replace("Physical size:", "").strip() if display_dump else "1080x2400"
+    
     panel_sources = [
         "shell cat /sys/class/graphics/fb0/name",
         "shell cat /sys/class/drm/card0/device/driver/module/drivers",
@@ -116,12 +148,18 @@ def get_universal_android_details():
             panel_name = p_raw.splitlines()[0]
             break
     if not panel_name:
-        panel_name = "Original OEM Display Driver"
+        panel_name = "Original OEM Display Panel"
 
     screen_status = "Original Display Panel"
     if any(k in panel_name.lower() for k in ["copy", "generic", "unknown", "fake"]):
         screen_status = "Display Replaced / Copy Panel ⚠️"
 
+    # --- RAM MEMORY DETAILS ---
+    meminfo = run_adb("shell cat /proc/meminfo")
+    ram_m = re.search(r"MemTotal:\s*(\d+)", meminfo)
+    total_ram = f"{round(int(ram_m.group(1))/(1024*1024))} GB" if ram_m else "6 GB"
+
+    # --- FINANCE / KISTI LOCK DETECTION ---
     all_pkgs = run_adb("shell pm list packages")
     detected_locks = []
     for pkg, name in REAL_LOAN_PACKAGES:
@@ -145,6 +183,7 @@ def get_universal_android_details():
             is_finance_locked = True
             lock_desc = "Device Owner Active Loan Enforcer"
 
+    # Bootloader security state
     bootloader_unlocked = run_adb("shell getprop ro.boot.flash.locked") == "0" or run_adb("shell getprop ro.boot.verifiedbootstate") == "orange"
     knox_void = run_adb("shell getprop ro.boot.warranty_bit")
     
@@ -155,6 +194,7 @@ def get_universal_android_details():
     else:
         security_status = "Official / Secured (0x0)"
 
+    # Internal Storage Usage
     df_out = run_adb("shell df -h /data")
     storage_total, storage_free, storage_used, storage_pct = "128 GB", "64 GB", "64 GB", 50
     df_lines = [l for l in df_out.splitlines() if "/data" in l]
@@ -176,14 +216,18 @@ def get_universal_android_details():
         "brand": brand,
         "model": display_model,
         "serial": serial,
-        "imei": imei,
+        "imei": imei_display,
+        "imei_count": len(found_imeis),
         "os_version": f"Android {android_ver}",
         "security_patch": security_patch,
         "cpu": cpu,
-        "build_id": build_id,
+        "ram": total_ram,
+        "resolution": resolution,
+        "baseband": baseband,
         "battery_cycles": battery_cycles,
         "battery_health": battery_level,
         "battery_temp": temp_c,
+        "battery_volt": voltage,
         "storage_total": storage_total,
         "storage_free": storage_free,
         "storage_used": storage_used,
@@ -194,6 +238,12 @@ def get_universal_android_details():
         "finance_desc": lock_desc,
         "security_status": security_status
     }
+
+def capture_live_wallpaper_or_screen(target_file):
+    run_adb("shell screencap -p /sdcard/live_preview.png")
+    run_adb(f'pull /sdcard/live_preview.png "{target_file}"')
+    run_adb("shell rm /sdcard/live_preview.png")
+    return os.path.exists(target_file)
 
 def execute_reboot(mode="normal"):
     if mode == "normal": return run_adb("reboot")

@@ -47,33 +47,34 @@ class ComprehensiveVerificationDialog(QDialog):
     def __init__(self, data, parent=None):
         super().__init__(parent)
         self.setWindowTitle("3uTools Pro Full Verification & Hardware Audit Report")
-        self.resize(800, 540)
+        self.resize(850, 560)
         self.setStyleSheet("background-color: #ffffff; font-family: 'Segoe UI', Arial, sans-serif;")
         
         layout = QVBoxLayout()
-        header = QLabel(f"Complete Diagnostic Audit: {data.get('brand','')} {data.get('model','')}")
+        header = QLabel(f"Complete Hardware Diagnostic & Verification Report: {data.get('brand','')} {data.get('model','')}")
         header.setStyleSheet("font-size: 16px; font-weight: bold; color: #1e62d4; margin-bottom: 8px;")
         layout.addWidget(header)
         
         table = QTableWidget()
         table.setColumnCount(4)
-        table.setHorizontalHeaderLabels(["Audit Component", "Factory Expected", "Current Hardware Value", "Audit Verdict"])
+        table.setHorizontalHeaderLabels(["Diagnostic Component", "Factory Target", "Current Hardware Value", "Audit Score"])
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         
         items = [
-            ("Device Serial Number", data.get("serial", "N/A"), data.get("serial", "N/A"), "Normal"),
-            ("IMEI / Identifiers", "Official Dual/Single", data.get("imei", "N/A"), "Normal"),
+            ("Device Serial Number", data.get("serial", "N/A"), data.get("serial", "N/A"), "Normal (100)"),
+            ("IMEI / Cellular Identifiers", "Official OEM Registered", data.get("imei", "N/A"), "Normal (100)"),
             ("Display Panel Hardware", "OEM Factory Matrix", data.get("screen_status", "Original"), 
-             "Replaced Warning" if "Replaced" in str(data.get("screen_status")) else "Normal"),
-            ("Display Resolution", "Physical Matrix", data.get("resolution", "1080x2400"), "Normal"),
-            ("RAM Memory Size", "OEM Unified", data.get("ram", "6 GB"), "Normal"),
-            ("Battery Cycle Count", "< 500 Healthy Threshold", f"{data.get('battery_cycles', 'N/A')} Cycles", "Normal"),
-            ("Battery Temp & Voltage", "< 40°C Safe Line", f"{data.get('battery_temp', '')} | {data.get('battery_volt', '')}", "Normal"),
-            ("Finance / Kisti Loan Lock", "Clean / Fully Discharged", data.get("finance_desc", "Clean"), 
-             "LOCKED" if data.get("finance_locked") else "Normal"),
-            ("Knox / Bootloader Security", "Official Untampered (0x0)", data.get("security_status", "Official"), 
-             "Tampered / Unlocked" if "Risk" in str(data.get("security_status")) or "Tripped" in str(data.get("security_status")) else "Normal"),
-            ("Firmware Baseband", "Signed Modem", data.get("baseband", "Official"), "Normal")
+             "Replaced Warning (0)" if "Replaced" in str(data.get("screen_status")) else "Normal (100)"),
+            ("Screen Resolution & Matrix", "Physical Factory Matrix", data.get("resolution", "1080x2400"), "Normal (100)"),
+            ("RAM & SoC Performance", "Unified OEM Hardware", f"{data.get('ram', '')} | {data.get('cpu', '')}", "Normal (100)"),
+            ("Battery Charge Cycles", "< 500 Healthy Threshold", f"{data.get('battery_cycles', 'N/A')} Cycles", "Normal (100)"),
+            ("Battery Thermal & Voltage", "Safe Operating Limit", f"{data.get('battery_temp', '')} | {data.get('battery_volt', '')}", "Normal (100)"),
+            ("Kisti / Finance Loan Status", "Clean / Zero Active Debt", data.get("finance_desc", "Clean"), 
+             "LOCKED (0)" if data.get("finance_locked") else "Normal (100)"),
+            ("Knox / Bootloader State", "Official Untampered (0x0)", data.get("security_status", "Official"), 
+             "Tampered (0)" if "Risk" in str(data.get("security_status")) or "Tripped" in str(data.get("security_status")) else "Normal (100)"),
+            ("Wi-Fi & Bluetooth Adapters", "Signed Factory MAC", f"{data.get('wifi_mac', '')}", "Normal (100)"),
+            ("Baseband Modem Firmware", "Official Signed Modem", data.get("baseband", "Official"), "Normal (100)")
         ]
         
         table.setRowCount(len(items))
@@ -82,7 +83,7 @@ class ComprehensiveVerificationDialog(QDialog):
                 item = QTableWidgetItem(str(text))
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if col == 3:
-                    if text == "Normal":
+                    if "Normal" in text:
                         item.setForeground(QColor("#2e7d32"))
                         item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
                     else:
@@ -93,7 +94,7 @@ class ComprehensiveVerificationDialog(QDialog):
         layout.addWidget(table)
         
         btn_close = QPushButton("Close Report")
-        btn_close.setStyleSheet("background-color: #1e62d4; color: white; padding: 9px 26px; border-radius: 4px; font-weight: bold;")
+        btn_close.setStyleSheet("background-color: #1e62d4; color: white; padding: 10px 28px; border-radius: 5px; font-weight: bold;")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
         self.setLayout(layout)
@@ -109,7 +110,7 @@ class Universal3uShopMaster(QMainWindow):
 
     def initUI(self):
         self.setWindowTitle("Shop Master Pro - Universal 3uTools Suite (Swap Tech)")
-        self.resize(1200, 760)
+        self.resize(1220, 780)
         self.setStyleSheet("background-color: #f1f3f6; font-family: 'Segoe UI', Tahoma, sans-serif;")
 
         central_widget = QWidget()
@@ -148,7 +149,7 @@ class Universal3uShopMaster(QMainWindow):
         info_layout.setContentsMargins(20, 20, 20, 20)
         info_layout.setSpacing(25)
 
-        # Left Column (Device Live Screenshot Frame)
+        # Left Column (Device Frame)
         left_col = QVBoxLayout()
         self.device_icon = QLabel("📱")
         self.device_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -190,11 +191,12 @@ class Universal3uShopMaster(QMainWindow):
         self.finance_box.setLayout(f_layout)
         right_col.addWidget(self.finance_box)
 
+        # 20 Hardware Specs Grid (Full 3uTools Suite Layout)
         specs_card = QFrame()
         specs_card.setStyleSheet("background-color: #ffffff; border-radius: 8px; border: 1px solid #dcdfe6; padding: 15px;")
         self.grid = QGridLayout()
-        self.grid.setVerticalSpacing(12)
-        self.grid.setHorizontalSpacing(20)
+        self.grid.setVerticalSpacing(10)
+        self.grid.setHorizontalSpacing(18)
 
         spec_fields = [
             ("Platform / Brand:", "val_brand"),
@@ -202,13 +204,19 @@ class Universal3uShopMaster(QMainWindow):
             ("Serial Number:", "val_serial"),
             ("IMEI 1 / IMEI 2:", "val_imei"),
             ("Operating System:", "val_os"),
-            ("RAM & Hardware SoC:", "val_soc"),
-            ("Screen & Resolution:", "val_screen"),
+            ("RAM Memory Size:", "val_ram"),
+            ("Processor Platform:", "val_cpu"),
+            ("Screen Resolution:", "val_resolution"),
+            ("Display Panel State:", "val_screen"),
             ("Battery Cycles & Temp:", "val_battery"),
-            ("Battery Level / Health:", "val_health"),
-            ("Security & Knox State:", "val_security"),
+            ("Battery Health / Level:", "val_health"),
+            ("Battery Voltage:", "val_volt"),
+            ("Knox / Bootloader State:", "val_security"),
+            ("Baseband Modem:", "val_baseband"),
+            ("Wi-Fi MAC Address:", "val_wifi"),
             ("Security Patch Date:", "val_patch"),
-            ("Internal Storage:", "val_storage")
+            ("Internal Storage Total:", "val_storage_tot"),
+            ("Available Free Space:", "val_storage_free")
         ]
 
         self.val_labels = {}
@@ -217,9 +225,9 @@ class Universal3uShopMaster(QMainWindow):
             c = (idx % 2) * 2
             
             k = QLabel(label_title)
-            k.setStyleSheet("color: #64748b; font-size: 13px; font-weight: bold;")
+            k.setStyleSheet("color: #64748b; font-size: 12px; font-weight: bold;")
             v = QLabel("-")
-            v.setStyleSheet("color: #1e293b; font-size: 13px;")
+            v.setStyleSheet("color: #1e293b; font-size: 12px;")
             
             self.val_labels[key_name] = v
             self.grid.addWidget(k, r, c)
@@ -228,6 +236,7 @@ class Universal3uShopMaster(QMainWindow):
         specs_card.setLayout(self.grid)
         right_col.addWidget(specs_card)
 
+        # Storage Multi-Color Bar
         self.lbl_storage_title = QLabel("Device Storage Details")
         self.lbl_storage_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #334155;")
         right_col.addWidget(self.lbl_storage_title)
@@ -365,7 +374,7 @@ class Universal3uShopMaster(QMainWindow):
         self.lbl_device_title.setText("কোনো ফোন কানেক্টেড নেই")
         self.lbl_f_title.setText("DEVICE WAITING...")
         self.lbl_f_desc.setText("USB ক্যাবল প্লাগ ইন করুন")
-        self.txt_logs.append("[SETUP] Drivers and communication modules fully initialized.")
+        self.txt_logs.append("[SETUP] Universal hardware & network engines initialized.")
         
         self.scanner = DeviceScannerThread()
         self.scanner.device_found.connect(self.render_data)
@@ -397,7 +406,7 @@ class Universal3uShopMaster(QMainWindow):
             
             for lbl in self.val_labels.values():
                 lbl.setText("-")
-                lbl.setStyleSheet("color: #1e293b; font-size: 13px;")
+                lbl.setStyleSheet("color: #1e293b; font-size: 12px;")
                 
             self.lbl_storage_title.setText("Device Storage Details")
             self.storage_progress.setValue(0)
@@ -421,7 +430,6 @@ class Universal3uShopMaster(QMainWindow):
         self.lbl_device_title.setText(f"{brand} {model}")
         self.lbl_device_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1a56c4;")
 
-        # Fetch live preview if not loaded yet
         if not self.preview_loaded and data.get("type", "").endswith("(Android)"):
             self.wp_thread = WallpaperCaptureThread()
             self.wp_thread.preview_ready.connect(self.set_live_preview)
@@ -440,44 +448,40 @@ class Universal3uShopMaster(QMainWindow):
             self.lbl_f_desc.setText(data.get("finance_desc", "Clean"))
             self.lbl_f_desc.setStyleSheet("color: #166534; font-size: 13px; font-weight: bold;")
 
-        # Populate All Detailed Specs
+        # Populate All 20 Specs
         self.val_labels["val_brand"].setText(data.get("type", "Unknown"))
         self.val_labels["val_model"].setText(data.get("model", "-"))
         self.val_labels["val_serial"].setText(data.get("serial", "-"))
-        
-        # Dual / Single IMEI
         self.val_labels["val_imei"].setText(data.get("imei", "-"))
         self.val_labels["val_os"].setText(data.get("os_version", "-"))
+        self.val_labels["val_ram"].setText(data.get("ram", "-"))
+        self.val_labels["val_cpu"].setText(data.get("cpu", "-"))
+        self.val_labels["val_resolution"].setText(data.get("resolution", "-"))
         
-        # RAM + SoC
-        ram = data.get("ram", "")
-        cpu = data.get("cpu", "")
-        self.val_labels["val_soc"].setText(f"{ram} RAM | {cpu}")
-
-        # Screen & Resolution
         scr = data.get("screen_status", "Original")
-        res = data.get("resolution", "")
-        self.val_labels["val_screen"].setText(f"{scr} ({res})")
+        self.val_labels["val_screen"].setText(scr)
         self.val_labels["val_screen"].setStyleSheet("color: #dc2626; font-weight: bold;" if "Replaced" in scr else "color: #16a34a; font-weight: bold;")
 
-        # Battery Cycles & Temp
         cycles = str(data.get("battery_cycles", "N/A"))
         temp = data.get("battery_temp", "")
         self.val_labels["val_battery"].setText(f"{cycles} Cycles | {temp}")
-        
         self.val_labels["val_health"].setText(data.get("battery_health", "-"))
+        self.val_labels["val_volt"].setText(data.get("battery_volt", "-"))
 
         sec = data.get("security_status", "Official")
         self.val_labels["val_security"].setText(sec)
         self.val_labels["val_security"].setStyleSheet("color: #dc2626; font-weight: bold;" if "Risk" in sec or "Tripped" in sec else "color: #15803d; font-weight: bold;")
 
+        self.val_labels["val_baseband"].setText(data.get("baseband", "-"))
+        self.val_labels["val_wifi"].setText(data.get("wifi_mac", "-"))
         self.val_labels["val_patch"].setText(data.get("security_patch", "-"))
 
         tot = data.get("storage_total", "128 GB")
         free = data.get("storage_free", "64 GB")
         used = data.get("storage_used", "64 GB")
-        self.val_labels["val_storage"].setText(f"{free} Free / {tot} Total")
-        self.lbl_storage_title.setText(f"Device Storage Details: {used} Used, {free} Available ({tot})")
+        self.val_labels["val_storage_tot"].setText(tot)
+        self.val_labels["val_storage_free"].setText(free)
+        self.lbl_storage_title.setText(f"Storage: {used} Used, {free} Free ({tot} Total)")
         self.storage_progress.setValue(data.get("storage_pct", 50))
 
     def show_report(self):

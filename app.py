@@ -10,7 +10,7 @@ from PyQt6.QtGui import QColor, QFont, QPixmap
 from core.dependency_manager import check_and_setup_dependencies
 from core.android_checker import (get_universal_android_details, execute_reboot, 
                                     execute_screenshot, execute_get_installed_apps,
-                                    capture_live_wallpaper_or_screen)
+                                    capture_live_wallpaper_or_screen, execute_clear_cache)
 from core.ios_checker import get_universal_ios_details
 
 class SetupDependenciesThread(QThread):
@@ -130,7 +130,7 @@ class Universal3uShopMaster(QMainWindow):
         bar_layout.addWidget(logo)
 
         self.nav_btns = []
-        menus = ["iDevice / Android Info", "Apps & Packages", "RT Logs", "Toolbox (Fastboot/Reboot)"]
+        menus = ["iDevice / Android Info", "Apps & Packages", "RT Logs", "Toolbox (Full Features)"]
         for i, m in enumerate(menus):
             btn = QPushButton(m)
             btn.clicked.connect(lambda checked, idx=i: self.switch_view(idx))
@@ -143,13 +143,13 @@ class Universal3uShopMaster(QMainWindow):
 
         self.pages = QStackedWidget()
         
-        # --- TAB 1: Device Info ---
+        # TAB 1: Device Info
         self.tab_info = QWidget()
         info_layout = QHBoxLayout()
         info_layout.setContentsMargins(20, 20, 20, 20)
         info_layout.setSpacing(25)
 
-        # Left Column (Device Frame)
+        # Left Column
         left_col = QVBoxLayout()
         self.device_icon = QLabel("📱")
         self.device_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -191,7 +191,6 @@ class Universal3uShopMaster(QMainWindow):
         self.finance_box.setLayout(f_layout)
         right_col.addWidget(self.finance_box)
 
-        # 20 Hardware Specs Grid (Full 3uTools Suite Layout)
         specs_card = QFrame()
         specs_card.setStyleSheet("background-color: #ffffff; border-radius: 8px; border: 1px solid #dcdfe6; padding: 15px;")
         self.grid = QGridLayout()
@@ -236,7 +235,6 @@ class Universal3uShopMaster(QMainWindow):
         specs_card.setLayout(self.grid)
         right_col.addWidget(specs_card)
 
-        # Storage Multi-Color Bar
         self.lbl_storage_title = QLabel("Device Storage Details")
         self.lbl_storage_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #334155;")
         right_col.addWidget(self.lbl_storage_title)
@@ -259,7 +257,7 @@ class Universal3uShopMaster(QMainWindow):
         apps_layout.setContentsMargins(20, 20, 20, 20)
         
         apps_header = QHBoxLayout()
-        lbl_apps = QLabel("Installed Applications & Suspicious Loan Packages")
+        lbl_apps = QLabel("Installed Applications & Packages")
         lbl_apps.setStyleSheet("font-size: 16px; font-weight: bold; color: #1e293b;")
         apps_header.addWidget(lbl_apps)
         
@@ -294,12 +292,12 @@ class Universal3uShopMaster(QMainWindow):
         self.tab_logs.setLayout(logs_layout)
         self.pages.addWidget(self.tab_logs)
 
-        # TAB 4: Toolbox
+        # TAB 4: Full Toolbox
         self.tab_tools = QWidget()
         tools_layout = QVBoxLayout()
         tools_layout.setContentsMargins(25, 25, 25, 25)
         
-        lbl_tools_header = QLabel("Quick Device Toolbox (1-Click Working Actions)")
+        lbl_tools_header = QLabel("3uTools Master Toolbox (Universal Device Actions)")
         lbl_tools_header.setStyleSheet("font-size: 17px; font-weight: bold; color: #1e293b; margin-bottom: 10px;")
         tools_layout.addWidget(lbl_tools_header)
 
@@ -308,9 +306,10 @@ class Universal3uShopMaster(QMainWindow):
 
         tools = [
             ("🔄 Normal Reboot", "Reboot phone normally", lambda: self.handle_reboot("normal")),
-            ("⚡ Reboot to Recovery", "Reboot into Recovery mode for wipe/reset", lambda: self.handle_reboot("recovery")),
-            ("🚀 Reboot to Fastboot/Bootloader", "Reboot into Fastboot for firmware flash", lambda: self.handle_reboot("bootloader")),
-            ("📸 Take Device Screenshot", "Capture instant screenshot from connected phone", self.handle_screenshot)
+            ("⚡ Reboot to Recovery", "Reboot into Recovery mode for factory reset", lambda: self.handle_reboot("recovery")),
+            ("🚀 Reboot to Bootloader", "Reboot into Fastboot for firmware flash", lambda: self.handle_reboot("bootloader")),
+            ("📸 Capture Screenshot", "Save current high-res phone screen to PC", self.handle_screenshot),
+            ("🧹 Clean Junk & Cache", "Trim system app caches across all storage", self.handle_clear_cache)
         ]
 
         for idx, (title, desc, func) in enumerate(tools):
@@ -374,7 +373,7 @@ class Universal3uShopMaster(QMainWindow):
         self.lbl_device_title.setText("কোনো ফোন কানেক্টেড নেই")
         self.lbl_f_title.setText("DEVICE WAITING...")
         self.lbl_f_desc.setText("USB ক্যাবল প্লাগ ইন করুন")
-        self.txt_logs.append("[SETUP] Universal hardware & network engines initialized.")
+        self.txt_logs.append("[SETUP] Universal hardware & telephony engines initialized.")
         
         self.scanner = DeviceScannerThread()
         self.scanner.device_found.connect(self.render_data)
@@ -448,7 +447,7 @@ class Universal3uShopMaster(QMainWindow):
             self.lbl_f_desc.setText(data.get("finance_desc", "Clean"))
             self.lbl_f_desc.setStyleSheet("color: #166534; font-size: 13px; font-weight: bold;")
 
-        # Populate All 20 Specs
+        # Populate Specs
         self.val_labels["val_brand"].setText(data.get("type", "Unknown"))
         self.val_labels["val_model"].setText(data.get("model", "-"))
         self.val_labels["val_serial"].setText(data.get("serial", "-"))
@@ -516,6 +515,13 @@ class Universal3uShopMaster(QMainWindow):
         if path:
             execute_screenshot(path)
             QMessageBox.information(self, "Success", f"স্ক্রিনশট সেভ হয়েছে: {path}")
+
+    def handle_clear_cache(self):
+        if not self.current_data:
+            QMessageBox.warning(self, "Warning", "ডিভাইস কানেক্টেড নেই!")
+            return
+        execute_clear_cache()
+        QMessageBox.information(self, "Success", "ডিভাইসের ক্যাশ সফলভাবে ক্লিয়ার করা হয়েছে!")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

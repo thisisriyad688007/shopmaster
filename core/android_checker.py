@@ -29,6 +29,64 @@ def run_adb(cmd, timeout=5):
     except Exception:
         return ""
 
+def grant_imei_permissions():
+    run_adb("shell appops set com.android.shell READ_DEVICE_IDENTIFIERS allow")
+    run_adb("shell pm grant com.android.shell android.permission.READ_PRIVILEGED_PHONE_STATE")
+
+def extract_direct_imei():
+    grant_imei_permissions()
+    imei_list = []
+
+    # Method 1: dumpsys iphonesubinfo
+    dump_sub = run_adb("shell dumpsys iphonesubinfo")
+    for m in re.findall(r"(?:Device ID|IMEI|imei)\s*=\s*([0-9]{14,16})", dump_sub, re.IGNORECASE):
+        if m not in imei_list:
+            imei_list.append(m[:15])
+
+    # Method 2: service call iphonesubinfo (with modern hex parsing)
+    if not imei_list:
+        for slot in [1, 2, 3, 4]:
+            raw = run_adb(f"shell service call iphonesubinfo {slot}")
+            hex_parts = re.findall(r"[0-9a-fA-F]{8}", raw)
+            ascii_chars = []
+            for h in hex_parts:
+                try:
+                    bytes_val = bytes.fromhex(h)
+                    for b in bytes_val:
+                        if 48 <= b <= 57: # Numbers 0-9
+                            ascii_chars.append(chr(b))
+                except Exception:
+                    pass
+            candidate = "".join(ascii_chars)
+            for chunk in re.findall(r"([0-9]{14,15})", candidate):
+                if chunk not in imei_list:
+                    imei_list.append(chunk)
+
+    # Method 3: content query telephony
+    if not imei_list:
+        siminfo = run_adb("shell content query --uri content://telephony/siminfo")
+        for num in re.findall(r"(?:card_id|iccid|number)=([0-9]{14,16})", siminfo):
+            if num not in imei_list:
+                imei_list.append(num[:15])
+
+    # Method 4: Radio & System Properties
+    if not imei_list:
+        for prop in ["gsm.baseband.imei", "ril.imei1", "ril.imei2", "persist.radio.imei", "ro.ril.miui.imei"]:
+            val = run_adb(f"shell getprop {prop}")
+            for p in val.replace(" ", "").split(","):
+                if len(p) >= 14 and p.isdigit() and p[:15] not in imei_list:
+                    imei_list.append(p[:15])
+
+    # Format return
+    if len(imei_list) == 1:
+        return imei_list[0]
+    elif len(imei_list) >= 2:
+        return f"{imei_list[0]} / {imei_list[1]}"
+    
+    # Absolute Hardware Fallback
+    baseband_imei = run_adb("shell getprop gsm.baseband.imei")
+    return baseband_imei if baseband_imei else "Hardware Blocked by OS"
+
 def get_universal_android_details():
     devices_raw = run_adb("devices")
     lines = [line.strip() for line in devices_raw.splitlines() if line.strip() and not line.startswith("*")]
@@ -49,7 +107,6 @@ def get_universal_android_details():
             "error_msg": "Allow USB Debugging popup on phone screen"
         }
 
-    # Brand, Model, Commercial Name
     brand = run_adb("shell getprop ro.product.brand").upper() or run_adb("shell getprop ro.product.manufacturer").upper() or "ANDROID"
     model = run_adb("shell getprop ro.product.model") or run_adb("shell getprop ro.product.name") or "Generic Model"
     market_name = run_adb("shell getprop ro.product.marketname") or run_adb("shell getprop ro.config.marketing_name")
@@ -60,52 +117,16 @@ def get_universal_android_details():
     build_id = run_adb("shell getprop ro.build.display.id") or run_adb("shell getprop ro.build.id")
     baseband = run_adb("shell getprop gsm.version.baseband") or "Universal Baseband"
     
-    # CPU platform
     cpu = run_adb("shell getprop ro.soc.model") or run_adb("shell getprop ro.board.platform") or run_adb("shell getprop ro.hardware")
     if not cpu or cpu.lower() in ["unknown", "default"]:
         cpu_info = run_adb("shell cat /proc/cpuinfo")
         match_hardware = re.search(r"Hardware\s*:\s*(.+)", cpu_info)
         cpu = match_hardware.group(1).strip() if match_hardware else "Universal ARM64"
 
-    # --- ULTRA RELIABLE MULTI-METHOD IMEI EXTRACTION ---
-    found_imeis = []
+    # Direct IMEI execution
+    imei_display = extract_direct_imei()
 
-    # 1. Direct Content Query (Bypasses Android 10-15 Restrictions)
-    siminfo = run_adb("shell content query --uri content://telephony/siminfo")
-    for imei_candidate in re.findall(r"card_id=([0-9]{14,16})", siminfo) + re.findall(r"iccid=([0-9]{14,16})", siminfo):
-        if imei_candidate not in found_imeis:
-            found_imeis.append(imei_candidate[:15])
-
-    # 2. Telephony registry dump
-    telephony_dump = run_adb("shell dumpsys telephony.registry")
-    for imei_m in re.findall(r"(?:mImei|imei|mImei\[\d+\])\s*=\s*([0-9]{14,16})", telephony_dump, re.IGNORECASE):
-        if imei_m not in found_imeis:
-            found_imeis.append(imei_m[:15])
-
-    # 3. Radio Properties
-    for prop in ["gsm.baseband.imei", "ril.imei1", "ril.imei2", "persist.radio.imei", "ro.ril.miui.imei", "sys.identity.imei"]:
-        val = run_adb(f"shell getprop {prop}")
-        for part in val.replace(" ", "").split(","):
-            if len(part) >= 14 and part.isdigit() and part[:15] not in found_imeis:
-                found_imeis.append(part[:15])
-
-    # 4. Service Call Fallback
-    if not found_imeis:
-        for code in [1, 2, 3]:
-            raw_call = run_adb(f"shell service call iphonesubinfo {code}")
-            digits = "".join([c for c in raw_call if c.isdigit()])
-            if len(digits) >= 14 and digits[:15] not in found_imeis:
-                found_imeis.append(digits[:15])
-
-    # Format IMEIs
-    if len(found_imeis) == 1:
-        imei_display = found_imeis[0]
-    elif len(found_imeis) >= 2:
-        imei_display = f"{found_imeis[0]} / {found_imeis[1]}"
-    else:
-        imei_display = "Check *#06# on Dialer"
-
-    # Battery Diagnostics
+    # Battery
     battery_cycles = "N/A"
     for node in ["/sys/class/power_supply/battery/cycle_count", "/sys/class/power_supply/bms/battery_cycle", "/sys/class/power_supply/battery/battery_cycle", "/sys/class/power_supply/maxfg/cycle_count"]:
         val = run_adb(f"shell cat {node}")
@@ -126,7 +147,6 @@ def get_universal_android_details():
     temp_c = f"{float(temp_m.group(1))/10:.1f}°C" if temp_m else "32.0°C"
     voltage = f"{int(volt_m.group(1))/1000:.2f}V" if volt_m else "4.15V"
 
-    # Display Resolution & Panel
     display_dump = run_adb("shell wm size")
     resolution = display_dump.replace("Physical size:", "").strip() if display_dump else "1080x2400"
     
@@ -144,15 +164,13 @@ def get_universal_android_details():
     if any(k in panel_name.lower() for k in ["copy", "generic", "unknown", "fake"]):
         screen_status = "Display Replaced / Copy Panel ⚠️"
 
-    # RAM and Connectivity
     meminfo = run_adb("shell cat /proc/meminfo")
     ram_m = re.search(r"MemTotal:\s*(\d+)", meminfo)
     total_ram = f"{round(int(ram_m.group(1))/(1024*1024))} GB" if ram_m else "6 GB"
     
     wifi_mac = run_adb("shell cat /sys/class/net/wlan0/address") or "Official Wi-Fi MAC"
-    bt_mac = run_adb("shell settings get secure bluetooth_address") or "Official BT"
 
-    # Finance / Kisti Lock Detection
+    # Loan Locks
     all_pkgs = run_adb("shell pm list packages")
     detected_locks = []
     for pkg, name in REAL_LOAN_PACKAGES:
@@ -170,7 +188,6 @@ def get_universal_android_details():
         is_finance_locked = True
         lock_desc = f"Knox Guard Active (KG Bit: {kg_bit})"
 
-    # Bootloader & Root State
     bootloader_unlocked = run_adb("shell getprop ro.boot.flash.locked") == "0" or run_adb("shell getprop ro.boot.verifiedbootstate") == "orange"
     knox_void = run_adb("shell getprop ro.boot.warranty_bit")
     
@@ -181,7 +198,6 @@ def get_universal_android_details():
     else:
         security_status = "Official / Secured (0x0)"
 
-    # Storage Partitions
     df_out = run_adb("shell df -h /data")
     storage_total, storage_free, storage_used, storage_pct = "128 GB", "64 GB", "64 GB", 50
     df_lines = [l for l in df_out.splitlines() if "/data" in l]
@@ -211,7 +227,6 @@ def get_universal_android_details():
         "resolution": resolution,
         "baseband": baseband,
         "wifi_mac": wifi_mac,
-        "bt_mac": bt_mac,
         "battery_cycles": battery_cycles,
         "battery_health": battery_level,
         "battery_temp": temp_c,
@@ -254,3 +269,6 @@ def execute_get_installed_apps():
             if len(parts) == 2:
                 apps.append((os.path.basename(parts[0]), parts[1]))
     return apps
+
+def execute_clear_cache():
+    return run_adb("shell pm trim-caches 999G")

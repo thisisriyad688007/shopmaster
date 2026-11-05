@@ -3,8 +3,8 @@ import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QFrame, QPushButton, QProgressBar, 
                              QGridLayout, QDialog, QTableWidget, QTableWidgetItem, QHeaderView,
-                             QTabWidget, QTextEdit, QMessageBox, QFileDialog)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer
+                             QStackedWidget, QTextEdit, QMessageBox, QFileDialog)
+from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QColor, QFont
 
 from core.dependency_manager import check_and_setup_dependencies
@@ -12,7 +12,6 @@ from core.android_checker import (get_universal_android_details, execute_reboot,
                                     execute_screenshot, execute_get_installed_apps)
 from core.ios_checker import get_universal_ios_details
 
-# Driver Download Thread
 class SetupDependenciesThread(QThread):
     progress_signal = pyqtSignal(int, str)
     finished_signal = pyqtSignal()
@@ -21,7 +20,6 @@ class SetupDependenciesThread(QThread):
         check_and_setup_dependencies(lambda pct, msg: self.progress_signal.emit(pct, msg))
         self.finished_signal.emit()
 
-# Non-blocking USB Hardware Scanner
 class DeviceScannerThread(QThread):
     device_found = pyqtSignal(object)
 
@@ -35,7 +33,6 @@ class DeviceScannerThread(QThread):
             except Exception:
                 self.device_found.emit(None)
             self.msleep(1500)
-
 
 class VerificationReportDialog(QDialog):
     def __init__(self, data, parent=None):
@@ -89,7 +86,6 @@ class VerificationReportDialog(QDialog):
         layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
         self.setLayout(layout)
 
-
 class Universal3uShopMaster(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -108,7 +104,7 @@ class Universal3uShopMaster(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        # 1. 3uTools Classic Top Navigation Bar
+        # 1. Top Bar
         top_bar = QFrame()
         top_bar.setFixedHeight(55)
         top_bar.setStyleSheet("background-color: #1a56c4; border-bottom: 2px solid #144399;")
@@ -120,7 +116,7 @@ class Universal3uShopMaster(QMainWindow):
         bar_layout.addWidget(logo)
 
         self.nav_btns = []
-        menus = ["iDevice / Android Info", "Apps & Packages", "RT (Real-Time) Logs", "Toolbox (Fastboot/Reboot)"]
+        menus = ["iDevice / Android Info", "Apps & Packages", "RT Logs", "Toolbox (Fastboot/Reboot)"]
         for i, m in enumerate(menus):
             btn = QPushButton(m)
             btn.clicked.connect(lambda checked, idx=i: self.switch_view(idx))
@@ -131,11 +127,10 @@ class Universal3uShopMaster(QMainWindow):
         top_bar.setLayout(bar_layout)
         root_layout.addWidget(top_bar)
 
-        # 2. Tab Widget for Multiple Full-Working Sections
-        self.pages = QTabWidget()
-        self.pages.tabBar().hide() # Use our custom 3uTools top nav buttons
+        # 2. QStackedWidget (Correct widget for view switching)
+        self.pages = QStackedWidget()
         
-        # --- TAB 1: Main Device Info Dashboard ---
+        # --- TAB 1: Device Info ---
         self.tab_info = QWidget()
         info_layout = QHBoxLayout()
         info_layout.setContentsMargins(20, 20, 20, 20)
@@ -170,7 +165,6 @@ class Universal3uShopMaster(QMainWindow):
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
 
-        # Dynamic Finance/Kisti Alert Banner
         self.finance_box = QFrame()
         self.finance_box.setStyleSheet("background-color: #f1f5f9; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 12px;")
         f_layout = QHBoxLayout()
@@ -184,7 +178,6 @@ class Universal3uShopMaster(QMainWindow):
         self.finance_box.setLayout(f_layout)
         right_col.addWidget(self.finance_box)
 
-        # 12 Hardware Specs Grid
         specs_card = QFrame()
         specs_card.setStyleSheet("background-color: #ffffff; border-radius: 8px; border: 1px solid #dcdfe6; padding: 15px;")
         self.grid = QGridLayout()
@@ -223,7 +216,6 @@ class Universal3uShopMaster(QMainWindow):
         specs_card.setLayout(self.grid)
         right_col.addWidget(specs_card)
 
-        # Storage Space Details
         self.lbl_storage_title = QLabel("Device Storage Details")
         self.lbl_storage_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #334155;")
         right_col.addWidget(self.lbl_storage_title)
@@ -240,7 +232,7 @@ class Universal3uShopMaster(QMainWindow):
         self.tab_info.setLayout(info_layout)
         self.pages.addWidget(self.tab_info)
 
-        # --- TAB 2: Apps & Package Inspection ---
+        # --- TAB 2: Apps ---
         self.tab_apps = QWidget()
         apps_layout = QVBoxLayout()
         apps_layout.setContentsMargins(20, 20, 20, 20)
@@ -266,7 +258,7 @@ class Universal3uShopMaster(QMainWindow):
         self.tab_apps.setLayout(apps_layout)
         self.pages.addWidget(self.tab_apps)
 
-        # --- TAB 3: RT Logs & Terminal Output ---
+        # --- TAB 3: RT Logs ---
         self.tab_logs = QWidget()
         logs_layout = QVBoxLayout()
         logs_layout.setContentsMargins(20, 20, 20, 20)
@@ -282,7 +274,7 @@ class Universal3uShopMaster(QMainWindow):
         self.tab_logs.setLayout(logs_layout)
         self.pages.addWidget(self.tab_logs)
 
-        # --- TAB 4: 3uTools Working Toolbox ---
+        # --- TAB 4: Toolbox ---
         self.tab_tools = QWidget()
         tools_layout = QVBoxLayout()
         tools_layout.setContentsMargins(25, 25, 25, 25)
@@ -369,21 +361,18 @@ class Universal3uShopMaster(QMainWindow):
         self.scanner.start()
 
     def render_data(self, data):
-        # 1. DISCONNECTED STATE (FIX: RESET ALL VALUES + NO FALSE KISTI ALERTS)
         if not data:
             self.current_data = None
             self.lbl_device_title.setText("কোনো ফোন কানেক্টেড নেই")
             self.lbl_device_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #94a3b8;")
             self.device_icon.setText("🔌")
             
-            # Reset finance box to clean neutral
             self.finance_box.setStyleSheet("background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px;")
             self.lbl_f_title.setText("DEVICE WAITING...")
             self.lbl_f_title.setStyleSheet("color: #64748b; font-size: 15px; font-weight: 800;")
             self.lbl_f_desc.setText("USB ক্যাবল প্লাগ ইন করুন")
             self.lbl_f_desc.setStyleSheet("color: #64748b; font-size: 13px;")
             
-            # Reset all specs to hyphen '-'
             for lbl in self.val_labels.values():
                 lbl.setText("-")
                 lbl.setStyleSheet("color: #1e293b; font-size: 13px;")
@@ -392,7 +381,6 @@ class Universal3uShopMaster(QMainWindow):
             self.storage_progress.setValue(0)
             return
 
-        # 2. UNAUTHORIZED STATE
         if data.get("state") == "unauthorized":
             self.current_data = data
             self.lbl_device_title.setText("স্ক্রিনে পারমিশন দিন!")
@@ -404,7 +392,6 @@ class Universal3uShopMaster(QMainWindow):
             self.lbl_f_desc.setText("স্ক্রিনে 'Always allow from this computer' দিয়ে OK চাপুন")
             return
 
-        # 3. CONNECTED STATE
         self.current_data = data
         brand = data.get("brand", "")
         model = data.get("model", "")
@@ -412,7 +399,6 @@ class Universal3uShopMaster(QMainWindow):
         self.lbl_device_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1a56c4;")
         self.device_icon.setText("📱")
 
-        # Loan / Finance Status
         if data.get("finance_locked"):
             self.finance_box.setStyleSheet("background-color: #fef2f2; border: 2px solid #ef4444; border-radius: 6px; padding: 12px;")
             self.lbl_f_title.setText("⚠️ KISTI / FINANCE LOCK DETECTED!")
@@ -426,7 +412,6 @@ class Universal3uShopMaster(QMainWindow):
             self.lbl_f_desc.setText(data.get("finance_desc", "Clean"))
             self.lbl_f_desc.setStyleSheet("color: #166534; font-size: 13px; font-weight: bold;")
 
-        # Populate Specs
         self.val_labels["val_brand"].setText(data.get("type", "Unknown"))
         self.val_labels["val_model"].setText(data.get("model", "-"))
         self.val_labels["val_serial"].setText(data.get("serial", "-"))

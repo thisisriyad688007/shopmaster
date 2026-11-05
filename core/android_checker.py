@@ -3,7 +3,6 @@ import re
 import os
 from core.dependency_manager import get_bin_path
 
-# Strictly active malicious/loan control packages only
 REAL_LOAN_PACKAGES = [
     ("com.payjoy.access", "PayJoy Access Lock"),
     ("com.payjoy.sam", "PayJoy SAM Agent"),
@@ -50,7 +49,6 @@ def get_universal_android_details():
             "error_msg": "Allow USB Debugging popup on phone screen"
         }
 
-    # Brand, Model, Market Name
     brand = run_adb("shell getprop ro.product.brand").upper() or run_adb("shell getprop ro.product.manufacturer").upper() or "ANDROID"
     model = run_adb("shell getprop ro.product.model") or run_adb("shell getprop ro.product.name") or "Generic Model"
     market_name = run_adb("shell getprop ro.product.marketname") or run_adb("shell getprop ro.config.marketing_name")
@@ -66,7 +64,6 @@ def get_universal_android_details():
         match_hardware = re.search(r"Hardware\s*:\s*(.+)", cpu_info)
         cpu = match_hardware.group(1).strip() if match_hardware else "Universal ARM64"
 
-    # Universal IMEI Extraction
     imei = "N/A"
     imei_props = [
         "gsm.baseband.imei", "ro.ril.oem.imei", "persist.radio.imei", 
@@ -84,7 +81,6 @@ def get_universal_android_details():
         cleaned = "".join([c for c in "".join(imei_chars) if c.isdigit()])
         imei = cleaned[:15] if len(cleaned) >= 14 else serial
 
-    # Battery Cycles & Health calculation
     battery_cycles = "N/A"
     cycle_nodes = [
         "/sys/class/power_supply/battery/cycle_count",
@@ -108,7 +104,6 @@ def get_universal_android_details():
     battery_level = (level_m.group(1) + "%") if level_m else "100%"
     temp_c = f"{float(temp_m.group(1))/10:.1f}°C" if temp_m else "31.5°C"
 
-    # Screen Display Status
     panel_sources = [
         "shell cat /sys/class/graphics/fb0/name",
         "shell cat /sys/class/drm/card0/device/driver/module/drivers",
@@ -127,19 +122,13 @@ def get_universal_android_details():
     if any(k in panel_name.lower() for k in ["copy", "generic", "unknown", "fake"]):
         screen_status = "Display Replaced / Copy Panel ⚠️"
 
-    # ACCURATE LOAN / KISTI DETECTION (No False Positives)
-    # Check ONLY actual installed packages
-    installed_pkgs = run_adb("shell pm list packages -3") # Third party/installed apps
     all_pkgs = run_adb("shell pm list packages")
-    
     detected_locks = []
     for pkg, name in REAL_LOAN_PACKAGES:
         if f"package:{pkg}" in all_pkgs:
             detected_locks.append(name)
 
-    # Knox Guard check (Samsung only)
     kg_bit = run_adb("shell getprop ro.boot.kg.bit")
-    kg_state = run_adb("shell getprop ro.boot.kg.state")
     
     is_finance_locked = False
     lock_desc = "CLEAN (কোন কিস্তি/ফাইন্যান্স বা লোন লক নেই)"
@@ -151,13 +140,11 @@ def get_universal_android_details():
         is_finance_locked = True
         lock_desc = f"Knox Guard Active (KG Bit: {kg_bit})"
     else:
-        # Check if actual Device Owner is set (MDM managed loan)
         d_owner = run_adb("shell dumpsys device_policy | grep 'Device Owner:'")
         if d_owner and any(x in d_owner.lower() for x in ["payjoy", "loan", "finance", "kisti", "credit"]):
             is_finance_locked = True
             lock_desc = "Device Owner Active Loan Enforcer"
 
-    # Bootloader & Security State
     bootloader_unlocked = run_adb("shell getprop ro.boot.flash.locked") == "0" or run_adb("shell getprop ro.boot.verifiedbootstate") == "orange"
     knox_void = run_adb("shell getprop ro.boot.warranty_bit")
     
@@ -168,7 +155,6 @@ def get_universal_android_details():
     else:
         security_status = "Official / Secured (0x0)"
 
-    # Internal Storage Usage
     df_out = run_adb("shell df -h /data")
     storage_total, storage_free, storage_used, storage_pct = "128 GB", "64 GB", "64 GB", 50
     df_lines = [l for l in df_out.splitlines() if "/data" in l]
@@ -209,7 +195,6 @@ def get_universal_android_details():
         "security_status": security_status
     }
 
-# Action tools implementation
 def execute_reboot(mode="normal"):
     if mode == "normal": return run_adb("reboot")
     if mode == "recovery": return run_adb("reboot recovery")
@@ -218,7 +203,7 @@ def execute_reboot(mode="normal"):
 
 def execute_screenshot(save_path):
     run_adb("shell screencap -p /sdcard/s.png")
-    run_adb(f"pull /sdcard/s.png \"{save_path}\"")
+    run_adb(f'pull /sdcard/s.png "{save_path}"')
     run_adb("shell rm /sdcard/s.png")
     return True
 
